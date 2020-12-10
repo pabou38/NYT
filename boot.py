@@ -7,6 +7,7 @@ import gc
 from machine import deepsleep, idle, RTC, reset_cause, DEEPSLEEP_RESET, DEEPSLEEP
 from utime import sleep_ms, sleep, sleep_us, localtime, mktime
 from machine import Pin, RTC
+import framebuf
 
 # check if the device woke from a deep sleep
 if reset_cause() == DEEPSLEEP_RESET:
@@ -17,24 +18,29 @@ else:
 r = RTC()
 mem = r.memory()  # content survives deep sleep
 
-print('RTC memory: ', mem)
+print('RTC memory: ', mem)  # bytes
 
-avoid_ghost = False 
-
+# initialize and increment RTC memory.  digit as string
 if (mem == b''):
   print('RTC memory empty. initializing ..')
-  r.memory("1")
+  mem = "0"
+  r.memory(mem)
+
+mem_int = int(mem)
+  
+# avoid gosts
+if mem_int == 9:
+  avoid_ghost = True  # could be used to do some housekeeping on the display every x deep sleep
+  mem_int = 1
+  print('will fill buffer with 1 = white')
 else:
-  mem = int(mem)
-  mem = mem + 1
-
-  if mem == 5:
-    avoid_ghost == True  # could be used to do some housekeeping on the display every 5 deep sleep
-
-  if mem > 9:
-    mem = 1
-  r.memory(str(mem))
-  print('writing RTC memory: ' , mem)
+  avoid_ghost = False
+  mem_int = mem_int + 1
+  print('no need to fill with white yet')
+  
+mem = str(mem_int)
+r.memory(mem)
+print('writing RTC memory for next boot: ', mem, mem_int)
 
 # power led removed with cuter to save power during deep sleep
 # on board led is GPIO 2
@@ -90,7 +96,6 @@ def frame_local():
   gc.collect()
   print('delta free: ', free - gc.mem_free())
 
-  import framebuf
   # buf need to be bytearray, not bytes TypeError: object with buffer protocol required
   fb = framebuf.FrameBuffer(buf, w, h, framebuf.MONO_HLSB)
   print('framebuffer created' , type(fb))
@@ -150,7 +155,6 @@ def frame_remote():
       x = int.from_bytes(x,'little')
       buf[i]=x
 
-  import framebuf
   # buf need to be bytearray, not bytes. TypeError: object with buffer protocol required
   fb = framebuf.FrameBuffer(buf, 800, 640, framebuf.MONO_HLSB)
   print('framebuffer created' , type(fb))
@@ -160,9 +164,7 @@ def frame_remote():
 ########################################################
 # update epaper with framebuffer
 ########################################################
-def refresh_epaper():
-
-  global avoid_ghost
+def refresh_epaper(buf):
 
   miso = Pin(12) # not used
   sck = Pin(13)
@@ -190,8 +192,6 @@ def refresh_epaper():
 
   e.sleep()
   print('epaper put to sleep')
-
-  print('epaper procesing ' , )
 
 ############################################################
 #  boot
@@ -299,7 +299,8 @@ net = [
 """
 
 ########################################################
-# update epaper
+# update epaper with content. either pdf or all white
+# buf alrady allocated and updated
 ########################################################
 def refresh_epaper(buf):
   miso = Pin(12) # not used
@@ -385,7 +386,26 @@ print("stack used: ", stack_use())
 print("mem info (1 for memory map): ", mem_info()) 
 
 
-# build framebuffer
+################################################################
+# every so often, based on RTC memory, fill screen with white, than go to sleep for a while
+################################################################
+
+if avoid_ghost:
+  print('write entiere screen with white to avoid ghosts')
+  buf = bytearray(800 * 480 // 8)
+  fb = framebuf.FrameBuffer(buf, 800, 480, framebuf.MONO_HLSB)
+  white = 1
+  # frame buffer is all white
+  fb.fill(white)
+  refresh_epaper(buf)
+
+  sleeptime_msec = 10*60*1000  # 10 mn
+  print('deep sleep after un gosthing the screen', sleeptime_msec/(3600*1000))
+  deepsleep(sleeptime_msec)
+
+
+
+# build framebuffer with content
 #(fb,buf) = frame_local() # if the pbm file is already in ESP32 flash memory
 (fb,buf) = frame_remote() # get pbm file from raspberry PI web server
 
