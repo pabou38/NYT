@@ -1,3 +1,5 @@
+# PABOU
+
 """
 MicroPython Waveshare 4.2" Black/White GDEW042T2 e-paper display driver
 https://github.com/mcauser/micropython-waveshare-epaper
